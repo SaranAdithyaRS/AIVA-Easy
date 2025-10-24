@@ -3,39 +3,49 @@ import cv2
 import numpy as np
 import base64
 from flask_cors import CORS
-from paddleocr import PaddleOCR
+import easyocr
 
 app = Flask(__name__)
 CORS(app)
 
-# Initialize PaddleOCR once
-ocr = PaddleOCR(use_angle_cls=True, lang='en')
+# Initialize EasyOCR once (English only for lightweight setup)
+reader = easyocr.Reader(['en'], gpu=False)
 
 @app.route('/ocr', methods=['POST'])
 def ocr_process():
     data = request.json
     image_b64 = data.get('frame', '')
 
+    # Clean Base64 string
     if ',' in image_b64:
         image_b64 = image_b64.split(',')[1]
 
-    img_bytes = base64.b64decode(image_b64)
-    np_arr = np.frombuffer(img_bytes, np.uint8)
-    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    # Decode base64 -> OpenCV image
+    try:
+        img_bytes = base64.b64decode(image_b64)
+        np_arr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    except Exception:
+        return jsonify({"response": "Invalid image encoding"})
 
     if frame is None:
         return jsonify({"response": "Invalid image"})
 
-    result = ocr.ocr(frame)
-    text = " ".join([line[1][0] for line in result[0]]) if result and result[0] else "No text detected"
+    # Run OCR
+    try:
+        results = reader.readtext(frame)
+        text = " ".join([res[1] for res in results]) if results else "No text detected"
+    except Exception as e:
+        text = f"OCR failed: {str(e)}"
+
     return jsonify({"response": text})
 
 @app.route('/health')
 def health():
-    return jsonify({"status": "OCR server running"})
+    return jsonify({"status": "EasyOCR server running"})
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🚀 OCR Server (PaddleOCR) Running on Port 6000")
+    print("🚀 OCR Server (EasyOCR) Running on Port 6000")
     print("=" * 50)
     app.run(host="0.0.0.0", port=6000)
