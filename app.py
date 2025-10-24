@@ -1,51 +1,59 @@
 from flask import Flask, request, jsonify
-import cv2
-import numpy as np
 import base64
+import requests
 from flask_cors import CORS
-import easyocr
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-# Initialize EasyOCR once (English only for lightweight setup)
-reader = easyocr.Reader(['en'], gpu=False)
+# OCR.space config
+OCR_API_KEY = os.getenv("OCR_SPACE_API_KEY", "K89861181488957")
+OCR_URL = "https://api.ocr.space/parse/image"
 
-@app.route('/ocr', methods=['POST'])
+@app.route("/ocr", methods=["POST"])
 def ocr_process():
     data = request.json
-    image_b64 = data.get('frame', '')
+    image_b64 = data.get("frame", "")
 
-    # Clean Base64 string
-    if ',' in image_b64:
-        image_b64 = image_b64.split(',')[1]
+    if not image_b64:
+        return jsonify({"response": "No image provided"}), 400
 
-    # Decode base64 -> OpenCV image
+    # Remove possible data URI header
+    if "," in image_b64:
+        image_b64 = image_b64.split(",")[1]
+
     try:
-        img_bytes = base64.b64decode(image_b64)
-        np_arr = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    except Exception:
-        return jsonify({"response": "Invalid image encoding"})
+        payload = {
+            "apikey": OCR_API_KEY,
+            "language": "eng",
+            "base64Image": f"data:image/jpeg;base64,{image_b64}"
+        }
 
-    if frame is None:
-        return jsonify({"response": "Invalid image"})
+        response = requests.post(OCR_URL, data=payload)
+        result = response.json()
 
-    # Run OCR
-    try:
-        results = reader.readtext(frame)
-        text = " ".join([res[1] for res in results]) if results else "No text detected"
+        parsed_text = ""
+        if "ParsedResults" in result:
+            parsed_text = "\n".join(
+                [res.get("ParsedText", "") for res in result["ParsedResults"]]
+            )
+
+        return jsonify({
+            "success": True,
+            "text": parsed_text.strip(),
+            "raw": result
+        })
+
     except Exception as e:
-        text = f"OCR failed: {str(e)}"
+        return jsonify({"success": False, "error": str(e)})
 
-    return jsonify({"response": text})
-
-@app.route('/health')
+@app.route("/health")
 def health():
-    return jsonify({"status": "EasyOCR server running"})
+    return jsonify({"status": "OCR.space server running"})
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🚀 OCR Server (EasyOCR) Running on Port 6000")
+    print("🚀 OCR Server (OCR.space) Running on Port 6000")
     print("=" * 50)
     app.run(host="0.0.0.0", port=6000)
